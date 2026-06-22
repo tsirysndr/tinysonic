@@ -105,7 +105,7 @@ func Start(ctx context.Context, cfg *config.Config, pool *sql.DB, progress *scan
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           corsMiddleware(mux),
+		Handler:           requestLogger(corsMiddleware(mux)),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
@@ -146,6 +146,51 @@ func corsMiddleware(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// requestLogger emits one log line per request: method, path, status, bytes,
+// duration. Wraps the inner handler so middleware ordering matters — keep this
+// outermost so the recorded status reflects what the client sees.
+func requestLogger(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &recordedResponse{ResponseWriter: w, status: http.StatusOK}
+		h.ServeHTTP(rw, r)
+		log.Printf("%s %s %d %dB %s", r.Method, r.URL.RequestURI(), rw.status, rw.bytes, time.Since(start))
+	})
+}
+
+type recordedResponse struct {
+	http.ResponseWriter
+	status      int
+	bytes       int64
+	wroteHeader bool
+}
+
+func (r *recordedResponse) WriteHeader(s int) {
+	if r.wroteHeader {
+		return
+	}
+	r.status = s
+	r.wroteHeader = true
+	r.ResponseWriter.WriteHeader(s)
+}
+
+func (r *recordedResponse) Write(b []byte) (int, error) {
+	if !r.wroteHeader {
+		r.wroteHeader = true
+	}
+	n, err := r.ResponseWriter.Write(b)
+	r.bytes += int64(n)
+	return n, err
+}
+
+// Flush passes through to the underlying ResponseWriter for http.ServeContent
+// streaming and chunked responses.
+func (r *recordedResponse) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // requireAuth returns true when the request authenticated; it has already
