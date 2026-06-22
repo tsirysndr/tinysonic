@@ -1,0 +1,7 @@
+/tinysonic
+/bin/
+*.db
+*.db-shm
+*.db-wal
+/covers/
+/smolsonic.toml
