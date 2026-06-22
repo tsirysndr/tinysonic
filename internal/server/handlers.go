@@ -731,32 +731,33 @@ func (s *State) Stream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 10, "Required parameter is missing: id")
 		return
 	}
-	song, err := repoFindSong(r.Context(), s.Pool, id)
+	path, contentType, found, err := s.lookupSong(r.Context(), id)
 	if err != nil {
 		log.Printf("stream lookup %s: %v", id, err)
 		writeError(w, 0, "database error")
 		return
 	}
-	if song == nil {
+	if !found {
 		writeError(w, 70, "Song not found")
 		return
 	}
-	f, err := os.Open(song.Path)
+	f, err := os.Open(path)
 	if err != nil {
-		log.Printf("stream open %s: %v", song.Path, err)
+		s.evictSong(id)
+		log.Printf("stream open %s: %v", path, err)
 		writeError(w, 0, "could not read file")
 		return
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		log.Printf("stream stat %s: %v", song.Path, err)
+		log.Printf("stream stat %s: %v", path, err)
 		writeError(w, 0, "could not read file")
 		return
 	}
-	w.Header().Set("Content-Type", song.ContentType)
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Accept-Ranges", "bytes")
-	http.ServeContent(w, r, song.Path, st.ModTime(), f)
+	http.ServeContent(w, r, path, st.ModTime(), f)
 }
 
 func (s *State) GetCoverArt(w http.ResponseWriter, r *http.Request) {

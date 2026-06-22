@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tsirysndr/tinysonic/internal/config"
@@ -21,6 +23,54 @@ type State struct {
 	MusicDir  string
 	CoversDir string
 	Progress  *scanner.Progress
+
+	// songCache maps a song id to its (path, content_type). Populated lazily
+	// on cache miss and warmed in the background at startup. Bypassing the DB
+	// for streams is what keeps first-byte latency under client timeouts on
+	// slow hardware (WASM SQLite on armv6 is the dominant cost otherwise).
+	songCache sync.Map
+}
+
+type songRef struct {
+	Path        string
+	ContentType string
+}
+
+func (s *State) lookupSong(ctx context.Context, id string) (path, contentType string, found bool, err error) {
+	if v, ok := s.songCache.Load(id); ok {
+		r := v.(songRef)
+		return r.Path, r.ContentType, true, nil
+	}
+	song, err := repoFindSong(ctx, s.Pool, id)
+	if err != nil {
+		return "", "", false, err
+	}
+	if song == nil {
+		return "", "", false, nil
+	}
+	s.songCache.Store(id, songRef{Path: song.Path, ContentType: song.ContentType})
+	return song.Path, song.ContentType, true, nil
+}
+
+func (s *State) evictSong(id string) { s.songCache.Delete(id) }
+
+func (s *State) preloadSongs(ctx context.Context) {
+	rows, err := s.Pool.QueryContext(ctx, "SELECT id, path, content_type FROM songs")
+	if err != nil {
+		log.Printf("song cache preload: %v", err)
+		return
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var id, path, ct string
+		if err := rows.Scan(&id, &path, &ct); err != nil {
+			continue
+		}
+		s.songCache.Store(id, songRef{Path: path, ContentType: ct})
+		n++
+	}
+	log.Printf("song cache: %d entries preloaded", n)
 }
 
 func Start(ctx context.Context, cfg *config.Config, pool *sql.DB, progress *scanner.Progress) error {
@@ -32,6 +82,8 @@ func Start(ctx context.Context, cfg *config.Config, pool *sql.DB, progress *scan
 		CoversDir: cfg.CoversDir,
 		Progress:  progress,
 	}
+
+	go s.preloadSongs(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -192,6 +244,28 @@ func (r *recordedResponse) Flush() {
 		f.Flush()
 	}
 }
+
+// ReadFrom delegates to the underlying ResponseWriter's ReadFrom when present,
+// which lets net/http use sendfile(2) for stream/cover responses. Without this
+// passthrough, io.Copy in http.ServeContent falls back to userspace Read/Write
+// loops — a major CPU hit on slow hardware.
+func (r *recordedResponse) ReadFrom(src io.Reader) (int64, error) {
+	if !r.wroteHeader {
+		r.wroteHeader = true
+	}
+	if rf, ok := r.ResponseWriter.(io.ReaderFrom); ok {
+		n, err := rf.ReadFrom(src)
+		r.bytes += n
+		return n, err
+	}
+	n, err := io.Copy(writerOnly{r.ResponseWriter}, src)
+	r.bytes += n
+	return n, err
+}
+
+// writerOnly hides the ResponseWriter's ReadFrom so io.Copy doesn't recurse
+// when we fall back to the non-sendfile path.
+type writerOnly struct{ io.Writer }
 
 // requireAuth returns true when the request authenticated; it has already
 // written the error response when this returns false.

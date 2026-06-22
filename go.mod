@@ -7,8 +7,8 @@ require (
 	github.com/abema/go-mp4 v1.7.1
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/go-audio/wav v1.1.0
-	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/mewkiz/flac v1.0.13
+	github.com/ncruces/go-sqlite3 v0.35.1
 	github.com/tcolgate/mp3 v0.0.0-20170426193717-e79c5a46d300
 )
 
@@ -19,4 +19,7 @@ require (
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/mewkiz/pkg v0.0.0-20250417130911-3f050ff8c56d // indirect
 	github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v3 v3.1.35302 // indirect
+	github.com/ncruces/julianday v1.0.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 )
