@@ -5,9 +5,32 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
-	_ "modernc.org/sqlite"
+	"github.com/mattn/go-sqlite3"
 )
+
+const driverName = "sqlite3_tinysonic"
+
+var registerOnce sync.Once
+
+// registerDriver wires a ConnectHook that applies session pragmas
+// (cache_size, temp_store, mmap_size) to every new connection the pool opens.
+// These can't be set via the DSN with mattn/go-sqlite3.
+func registerDriver() {
+	registerOnce.Do(func() {
+		sql.Register(driverName, &sqlite3.SQLiteDriver{
+			ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+				_, err := conn.Exec(`
+					PRAGMA cache_size = -20000;
+					PRAGMA temp_store = MEMORY;
+					PRAGMA mmap_size = 67108864;
+				`, nil)
+				return err
+			},
+		})
+	})
+}
 
 func Init(path string) (*sql.DB, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
@@ -15,11 +38,12 @@ func Init(path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("creating db parent dir %s: %w", dir, err)
 		}
 	}
+	registerDriver()
 	dsn := fmt.Sprintf(
-		"file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)&_pragma=busy_timeout(5000)",
+		"file:%s?_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=on&_busy_timeout=5000",
 		path,
 	)
-	d, err := sql.Open("sqlite", dsn)
+	d, err := sql.Open(driverName, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite at %s: %w", path, err)
 	}
