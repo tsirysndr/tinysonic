@@ -36,6 +36,9 @@ func main() {
 
 	progress := &scanner.Progress{}
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	if !args.NoScan {
 		go func() {
 			log.Printf("starting library scan of %s", cfg.MusicDir)
@@ -45,8 +48,13 @@ func main() {
 		}()
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	if !args.NoWatch {
+		go func() {
+			if err := scanner.Watch(ctx, pool, cfg.MusicDir, cfg.CoversDir); err != nil {
+				log.Printf("watch: %v", err)
+			}
+		}()
+	}
 
 	if err := server.Start(ctx, cfg, pool, progress); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server: %v", err)

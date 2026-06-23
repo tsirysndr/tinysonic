@@ -19,6 +19,7 @@ const Banner = `
 type Args struct {
 	ConfigPath string
 	NoScan     bool
+	NoWatch    bool
 }
 
 func Parse() Args {
@@ -26,6 +27,7 @@ func Parse() Args {
 	flag.StringVar(&a.ConfigPath, "config", "smolsonic.toml", "Path to the TOML config file")
 	flag.StringVar(&a.ConfigPath, "c", "smolsonic.toml", "Path to the TOML config file (shorthand)")
 	flag.BoolVar(&a.NoScan, "no-scan", false, "Skip the startup library scan")
+	flag.BoolVar(&a.NoWatch, "no-watch", false, "Disable the filesystem watcher that keeps the library in sync")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(),
 			"tinysonic %s — a tiny Subsonic-compatible music server\n\n"+

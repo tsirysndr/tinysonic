@@ -6,6 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/abema/go-mp4 v1.7.1
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-audio/wav v1.1.0
 	github.com/mewkiz/flac v1.0.13
 	github.com/ncruces/go-sqlite3 v0.35.1
