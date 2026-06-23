@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -58,17 +57,8 @@ func Scan(pool *sql.DB, musicDir, coversDir string, progress *Progress) (Stats, 
 	}
 
 	var stats Stats
-	err := filepath.WalkDir(musicDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// Continue past unreadable entries.
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !hasAudioExt(path) {
-			return nil
-		}
+	visited := make(map[string]bool)
+	walkAudio(musicDir, visited, func(path string) {
 		stats.Scanned++
 		progress.count.Store(int64(stats.Scanned))
 		switch res, perr := processFile(pool, path, coversDir); {
@@ -82,14 +72,43 @@ func Scan(pool *sql.DB, musicDir, coversDir string, progress *Progress) (Stats, 
 		case res == resultSkipped:
 			stats.Skipped++
 		}
-		return nil
 	})
-	if err != nil {
-		return stats, err
-	}
 	log.Printf("scan complete: %d scanned, %d inserted, %d updated, %d skipped",
 		stats.Scanned, stats.Inserted, stats.Updated, stats.Skipped)
 	return stats, nil
+}
+
+// walkAudio recursively walks dir, following symlinks for both files and
+// directories. Cycles are broken by tracking the canonical (symlink-resolved)
+// path of every directory we descend into.
+func walkAudio(dir string, visited map[string]bool, fn func(path string)) {
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return
+	}
+	if visited[real] {
+		return
+	}
+	visited[real] = true
+	log.Printf("scan: walking %s", dir)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		full := filepath.Join(dir, entry.Name())
+		info, err := os.Stat(full)
+		if err != nil {
+			continue
+		}
+		switch {
+		case info.IsDir():
+			walkAudio(full, visited, fn)
+		case info.Mode().IsRegular() && hasAudioExt(full):
+			fn(full)
+		}
+	}
 }
 
 func hasAudioExt(path string) bool {
